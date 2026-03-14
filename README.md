@@ -99,7 +99,7 @@ python kairos_lab/agents/architect.py sample_script.py
 ## Requirements
 - Python 3.10+
 - PyTorch
-- Ollama running locally with Mistral pulled
+- Ollama running locally with Deepseek-r1:7b / Mistral pulled
 - Mac M1/M2/M4, Linux, or Windows with 8GB+ RAM
 
 
