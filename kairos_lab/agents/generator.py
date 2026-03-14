@@ -103,7 +103,7 @@ def run_generator(script_path: str, architect_output: dict[str, ArchitectDecisio
             print(f"[Generator Agent] Could not find source for {func_name}, skipping.")
             continue
 
-        optimized_code = generate_optimized_code(original_source, decision)
+        optimized_code = clean_code(generate_optimized_code(original_source, decision))
 
         results[func_name] = GeneratorOutput(
             function=func_name,
@@ -115,6 +115,20 @@ def run_generator(script_path: str, architect_output: dict[str, ArchitectDecisio
 
     return results
 
+def clean_code(raw_output: str) -> str:
+    """Strip markdown backticks from LLM output."""
+    lines = raw_output.split('\n')
+    cleaned = []
+    inside_block = False
+    
+    for line in lines:
+        if line.strip().startswith('```'):
+            inside_block = not inside_block
+            continue
+        if inside_block or not line.strip().startswith('```'):
+            cleaned.append(line)
+    
+    return '\n'.join(cleaned).strip()
 
 if __name__ == "__main__":
     sys.path.append(".")
