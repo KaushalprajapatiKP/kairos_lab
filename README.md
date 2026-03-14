@@ -69,6 +69,7 @@ Download the installer from https://ollama.com/download
 ### 5. Pull the Mistral model
 ```bash
 ollama pull mistral
+ollama pull deepseek-r1:7b
 ```
 This downloads ~4GB. One time only.
 
@@ -101,16 +102,25 @@ python kairos_lab/agents/architect.py sample_script.py
 - Ollama running locally with Mistral pulled
 - Mac M1/M2/M4, Linux, or Windows with 8GB+ RAM
 
+
 ## Status
-Active development. 
+Active development. Solo technical founder building in public from Vadodara, India.
 
 - [x] Profiler Agent
 - [x] AST Parser Agent  
 - [x] Architect Agent
-- [ ] Generator Agent
+- [x] Generator Agent (DeepSeek-R1 7B — Triton + Numba output)
 - [ ] Verifier Agent
 - [ ] Human-in-the-Loop
 - [ ] Documentation Agent
+
+## Pipeline Output Example
+```
+Profiler    → inefficient_loop is 75% of runtime
+AST Parser  → nested loops, element-wise tensor access, depth 2
+Architect   → TRITON, high confidence
+Generator   → Triton kernel + Numba optimized code produced
+```
 
 ## Contributing
 Early stage. If you want to follow along or contribute, open an issue or watch the repo.
