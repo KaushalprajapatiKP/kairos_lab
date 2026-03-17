@@ -28,6 +28,13 @@ class ASTResult(BaseModel):
     start_line: int = 0
     end_line: int = 0
 
+class DependencyResolverOutput(BaseModel):
+    script_path: str
+    imports_found: list[str]
+    available: list[str]
+    missing: list[str]
+    can_proceed: bool
+    warning: Optional[str] = None
 
 class ArchitectDecision(BaseModel):
     function: str
@@ -65,3 +72,4 @@ class PipelineState(BaseModel):
     verifier_output: Optional[dict[str, VerifierOutput]] = None
     approved: bool = False
     final_output: Optional[dict] = None
+    dependency_output: Optional[DependencyResolverOutput] = None
