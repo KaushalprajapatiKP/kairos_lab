@@ -12,14 +12,29 @@ MODEL = "deepseek-r1:7b"
 
 def get_function_source(script_path: str, function_name: str) -> str:
     import ast
-    source = Path(script_path).read_text()
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            lines = source.split('\n')
-            start = node.lineno - 1
-            end = node.end_lineno
-            return '\n'.join(lines[start:end])
+    from pathlib import Path
+
+    script = Path(script_path)
+    project_folder = script.parent
+    all_files = list(project_folder.rglob("*.py"))
+    if script not in all_files:
+        all_files.append(script)
+
+    for f in all_files:
+        if f.name == "__init__.py":
+            continue
+        try:
+            source = f.read_text()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    lines = source.split('\n')
+                    start = node.lineno - 1
+                    end = node.end_lineno
+                    return '\n'.join(lines[start:end])
+        except SyntaxError:
+            continue
+
     return ""
 
 
@@ -137,7 +152,10 @@ if __name__ == "__main__":
     from kairos_lab.agents.architect import run_architect
 
     script = sys.argv[1] if len(sys.argv) > 1 else "sample_script.py"
-    bottlenecks = ["inefficient_loop", "matrix_ops"]
+    from kairos_lab.agents.profiler import run_profiler
+    profiler_output = run_profiler(script)
+    bottlenecks = profiler_output.top_functions
+
 
     print("[Pipeline] Step 1: AST Parser...")
     ast_output = run_ast_parser(script, bottlenecks)

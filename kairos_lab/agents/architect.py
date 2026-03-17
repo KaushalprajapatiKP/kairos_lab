@@ -81,7 +81,10 @@ if __name__ == "__main__":
     from kairos_lab.agents.ast_parser import run_ast_parser
 
     script = sys.argv[1] if len(sys.argv) > 1 else "sample_script.py"
-    bottlenecks = ["inefficient_loop", "matrix_ops"]
+    from kairos_lab.agents.profiler import run_profiler
+    profiler_output = run_profiler(script)
+    bottlenecks = profiler_output.top_functions
+
 
     ast_output = run_ast_parser(script, bottlenecks)
     decisions = run_architect(ast_output)

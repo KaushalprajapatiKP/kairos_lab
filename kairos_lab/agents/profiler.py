@@ -64,17 +64,36 @@ PROFILE OUTPUT:
 
 
 def extract_top_functions(profile_raw: str) -> list[str]:
-    """Extract top function names from cProfile output."""
+    """Extract top user-defined function names from cProfile output."""
+    
+    STDLIB_EXCLUDE = {
+        'get_annotations', 'create_dynamic', 'exec_dynamic',
+        '_process_class', '_create_fn', 'update_wrapper',
+        '_signature_from_callable', '_signature_from_function',
+        '_joinrealpath', 'loads', 'read', 'readlines', 'open_code',
+        'stat', 'lstat', 'listdir', 'join', 'startswith',
+        '__build_class__', '__new__', 'isinstance', 'getattr',
+        'hasattr', 'setattr', 'len', 'any', 'append', 'item'
+    }
+
     functions = []
     for line in profile_raw.split('\n'):
-        if 'sample_script' in line or '.py:' in line:
+        # Only look at lines from user project files
+        if ('sample_script' in line or 
+            'sample_project' in line or
+            ('kairos_lab' not in line and '.py:' in line and 
+             'site-packages' not in line and
+             'uv/python' not in line)):
             parts = line.strip().split()
             if parts:
                 last = parts[-1]
                 if '(' in last and ')' in last:
                     func_name = last.split('(')[-1].rstrip(')')
-                    if func_name not in ('', '<module>') and func_name not in functions:
+                    if (func_name not in ('', '<module>') and 
+                        func_name not in STDLIB_EXCLUDE and
+                        func_name not in functions):
                         functions.append(func_name)
+
     return functions[:3]
 
 

@@ -77,14 +77,63 @@ def check_availability(imports: list[str]) -> tuple[list[str], list[str]]:
             missing.append(f"{imp} (install: pip install {pip_name})")
     return available, missing
 
+def resolve_local_imports(script_path: str, project_root: str = None) -> list[str]:
+    """Recursively find all Python files in the project."""
+    script = Path(script_path)
+    root = Path(project_root) if project_root else script.parent
+    
+    all_files = [script_path]
+    visited = {str(script.resolve())}
+    queue = [script]
+
+    while queue:
+        current = queue.pop(0)
+        source = current.read_text()
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            module = None
+            if isinstance(node, ast.ImportFrom) and node.module:
+                module = node.module
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    module = alias.name
+
+            if module:
+                # Convert module path to file path
+                module_path = root / Path(module.replace(".", "/") + ".py")
+                if module_path.exists():
+                    resolved = str(module_path.resolve())
+                    if resolved not in visited:
+                        visited.add(resolved)
+                        all_files.append(str(module_path))
+                        queue.append(module_path)
+
+    return all_files
+
+
 def run_dependency_resolver(script_path: str) -> DependencyResolverOutput:
     """Main entry point. Returns DependencyResolverOutput Pydantic model."""
 
     print(f"[Dependency Resolver] Scanning: {script_path}")
 
-    source = Path(script_path).read_text()
-    imports_found = extract_imports(source)
+    # Find all project files recursively
+    project_root = str(Path(script_path).parent.parent)
+    all_files = resolve_local_imports(script_path, project_root)
+    print(f"[Dependency Resolver] Files scanned: {all_files}")
 
+    # Collect all imports across all files
+    all_imports = set()
+    for f in all_files:
+        source = Path(f).read_text()
+        imports = extract_imports(source)
+        all_imports.update(imports)
+
+    # Remove local package names
+    project_packages = {Path(script_path).parent.name}
+    all_imports = all_imports - project_packages
+
+    imports_found = sorted(list(all_imports))
     print(f"[Dependency Resolver] Imports found: {imports_found}")
 
     available, missing = check_availability(imports_found)

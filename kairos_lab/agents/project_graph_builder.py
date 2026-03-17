@@ -83,39 +83,64 @@ def find_leaf_functions(call_graph: dict[str, list[str]]) -> list[str]:
 
 
 def run_project_graph_builder(script_path: str) -> ProjectGraphOutput:
-    """Main entry point. Returns ProjectGraphOutput Pydantic model."""
+    """Main entry point. Scans all project files recursively."""
 
     print(f"[Project Graph Builder] Scanning: {script_path}")
 
-    source = Path(script_path).read_text()
-    tree = ast.parse(source)
+    script = Path(script_path)
+    root = script.parent.parent
 
-    functions_found = extract_all_functions(tree)
-    print(f"[Project Graph Builder] Functions found: {functions_found}")
+    # Find all Python files in the project folder
+    project_folder = script.parent
+    all_files = list(project_folder.rglob("*.py"))
+    # Also include the entry point if outside project folder
+    if script not in all_files:
+        all_files.append(script)
 
-    call_graph, call_sites = build_call_graph(source)
+    print(f"[Project Graph Builder] Files found: {[str(f) for f in all_files]}")
+
+    all_functions = []
+    combined_call_graph = {}
+    combined_call_sites = {}
+
+    for f in all_files:
+        if f.name == "__init__.py":
+            continue
+        source = f.read_text()
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+
+        functions = extract_all_functions(tree)
+        all_functions.extend(functions)
+
+        call_graph, call_sites = build_call_graph(source)
+        combined_call_graph.update(call_graph)
+        combined_call_sites.update(call_sites)
 
     # Build NetworkX graph
     G = nx.DiGraph()
-    for func, calls in call_graph.items():
+    for func, calls in combined_call_graph.items():
         G.add_node(func)
         for called in calls:
             G.add_edge(func, called)
 
-    entry_points = find_entry_points(call_graph)
-    leaf_functions = find_leaf_functions(call_graph)
+    entry_points = find_entry_points(combined_call_graph)
+    leaf_functions = find_leaf_functions(combined_call_graph)
 
+    print(f"[Project Graph Builder] Total functions: {len(all_functions)}")
     print(f"[Project Graph Builder] Entry points: {entry_points}")
     print(f"[Project Graph Builder] Leaf functions: {leaf_functions}")
-    print(f"[Project Graph Builder] Call sites mapped: {sum(len(v) for v in call_sites.values())} total")
+    print(f"[Project Graph Builder] Call sites mapped: {sum(len(v) for v in combined_call_sites.values())} total")
 
     return ProjectGraphOutput(
         script_path=script_path,
-        functions_found=functions_found,
-        call_graph=call_graph,
+        functions_found=all_functions,
+        call_graph=combined_call_graph,
         entry_points=entry_points,
         leaf_functions=leaf_functions,
-        call_sites=call_sites
+        call_sites=combined_call_sites
     )
 
 

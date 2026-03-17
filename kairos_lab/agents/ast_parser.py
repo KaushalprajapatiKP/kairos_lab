@@ -141,21 +141,60 @@ def extract_returns(func_node):
 
 
 def run_ast_parser(script_path: str, bottleneck_functions: list, line_hints: dict = None) -> dict[str, ASTResult]:
-    source = Path(script_path).read_text()
-    results = {}
+    
+    # Find all Python files in the project
+    script = Path(script_path)
+    project_folder = script.parent
+    all_files = list(project_folder.rglob("*.py"))
+    if script not in all_files:
+        all_files.append(script)
+
+    # Combine all source into one searchable map
+    function_sources = {}
+    for f in all_files:
+        if f.name == "__init__.py":
+            continue
+        source = f.read_text()
+        try:
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    function_sources[node.name] = source
+        except SyntaxError:
+            continue
+
     line_hints = line_hints or {}
+    results = {}
+
     for func_name in bottleneck_functions:
         print(f"[AST Parser Agent] Parsing function: {func_name}")
-        results[func_name] = parse_function(source, func_name, line_hints.get(func_name))
-    return results
+        source = function_sources.get(func_name)
+        if source:
+            results[func_name] = parse_function(source, func_name, line_hints.get(func_name))
+        else:
+            results[func_name] = ASTResult(
+                function_name=func_name, found=False,
+                args=[], loop_count=0, max_nesting_depth=0,
+                data_types=[], memory_access_pattern="unknown",
+                operations=[], returns=[], start_line=0, end_line=0
+            )
 
+    return results
 
 if __name__ == "__main__":
     import json
+    import sys
+    sys.path.append(".")
+    from kairos_lab.agents.profiler import run_profiler
+
     script = sys.argv[1] if len(sys.argv) > 1 else "sample_script.py"
-    bottlenecks = ["inefficient_loop", "matrix_ops"]
-    line_hints = {"inefficient_loop": 12, "matrix_ops": 22}
-    output = run_ast_parser(script, bottlenecks, line_hints)
+    
+    # Get real bottlenecks from Profiler
+    profiler_output = run_profiler(script)
+    bottlenecks = profiler_output.top_functions
+
+    print(f"\n[AST Parser] Using profiler bottlenecks: {bottlenecks}")
+    output = run_ast_parser(script, bottlenecks)
 
     print("\n" + "=" * 50)
     print("AST PARSER AGENT OUTPUT")
