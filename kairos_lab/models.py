@@ -25,6 +25,8 @@ class ASTResult(BaseModel):
     memory_access_pattern: str
     operations: list[str]
     returns: list[str]
+    start_line: int = 0
+    end_line: int = 0
 
 
 class ArchitectDecision(BaseModel):
