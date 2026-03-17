@@ -62,6 +62,14 @@ class VerifierOutput(BaseModel):
     speedup: Optional[float] = None
     error: Optional[str] = None
 
+class ProjectGraphOutput(BaseModel):
+    script_path: str
+    functions_found: list[str]
+    call_graph: dict[str, list[str]]
+    entry_points: list[str]
+    leaf_functions: list[str]
+    call_sites: dict[str, list[dict]]  
+
 
 class PipelineState(BaseModel):
     script_path: str
@@ -73,3 +81,4 @@ class PipelineState(BaseModel):
     approved: bool = False
     final_output: Optional[dict] = None
     dependency_output: Optional[DependencyResolverOutput] = None
+    project_graph_output: Optional[ProjectGraphOutput] = None
