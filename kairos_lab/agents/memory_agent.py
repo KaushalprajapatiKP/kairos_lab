@@ -4,10 +4,46 @@ import sys
 from pathlib import Path
 sys.path.append(".")
 
-from kairos_lab.models import MemoryAgentOutput, MemoryComparisonOutput, GeneratorOutput
+from kairos_lab.models import (
+    MemoryAgentOutput,
+    MemoryComparisonOutput,
+    GeneratorOutput,
+    DataflowOutput
+)
 
-ORIGINAL_IMPORTS = "import torch\nimport numpy as np\nimport math\n"
-OPTIMIZED_IMPORTS = "import torch\nimport numpy as np\nimport math\nimport numba as nb\n"
+# Map package names to their common import aliases
+IMPORT_ALIASES = {
+    "torch": "import torch\nimport torch.nn as nn",
+    "numpy": "import numpy as np",
+    "pandas": "import pandas as pd",
+    "matplotlib": "import matplotlib.pyplot as plt",
+    "scipy": "import scipy",
+    "sklearn": "import sklearn",
+    "tensorflow": "import tensorflow as tf",
+    "numba": "import numba as nb",
+    "triton": "import triton\nimport triton.language as tl",
+}
+
+
+def build_import_string(available_packages: list[str], include_numba: bool = False) -> str:
+    """Build import string from Dependency Resolver output — no hardcoding."""
+    lines = []
+
+    for pkg in available_packages:
+        if pkg in IMPORT_ALIASES:
+            lines.append(IMPORT_ALIASES[pkg])
+        else:
+            lines.append(f"import {pkg}")
+
+    # Always include math — stdlib, always safe
+    lines.append("import math")
+
+    # Add numba for optimized pass if not already included
+    if include_numba and "import numba as nb" not in "\n".join(lines):
+        lines.append("import numba as nb")
+
+    return "\n".join(lines) + "\n"
+
 
 def is_method(source_code: str, function_name: str) -> bool:
     """Check if a function is a class method."""
@@ -20,25 +56,64 @@ def is_method(source_code: str, function_name: str) -> bool:
     return False
 
 
-def build_test_input(function_name: str) -> list:
-    """Build minimal test inputs. Replaced by Dataflow Agent later."""
+def find_class_for_method(source_code: str, function_name: str) -> str:
+    """Find the class name that contains this method."""
+    tree = ast.parse(source_code)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in ast.walk(node):
+                if isinstance(item, ast.FunctionDef) and item.name == function_name:
+                    return node.name
+    return ""
+
+
+def find_function_source(script_path: str, function_name: str) -> tuple[str, bool]:
+    """
+    Find function source across all project files.
+    Returns (full_source, is_method).
+    """
+    script = Path(script_path)
+    project_folder = script.parent
+    all_files = list(project_folder.rglob("*.py"))
+    if script not in all_files:
+        all_files.append(script)
+
+    for f in all_files:
+        if f.name == "__init__.py":
+            continue
+        try:
+            source = f.read_text()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    method = is_method(source, function_name)
+                    return source, method
+        except SyntaxError:
+            continue
+
+    return "", False
+
+
+def build_test_input_from_dataflow(dataflow: DataflowOutput) -> list:
+    """Build test inputs from Dataflow Agent output — no hardcoding."""
     import torch
-    inputs = {
-        "slow_relu": [torch.randn(32, 256)],
-        "compute_accuracy": [torch.randn(32, 10), torch.randint(0, 10, (32,))],
-        "compute_loss_manual": [torch.randn(32, 10), torch.randint(0, 10, (32,))],
-        "inefficient_loop": [torch.randn(100, 100)],
-        "_generate_data": [],
-        "normalize": [[[float(i*j)/1000 for j in range(10)] for i in range(10)]],
-        "matrix_ops": [],
-    }
-    return inputs.get(function_name, [])
+
+    inputs = []
+    for arg_name, shape in dataflow.input_shapes.items():
+        dtype = dataflow.input_types.get(arg_name, "torch.float32")
+        if not shape:
+            continue
+        if dtype == "torch.int64":
+            inputs.append(torch.randint(0, 10, shape))
+        else:
+            inputs.append(torch.randn(shape))
+
+    return inputs
 
 
 def measure_memory(code: str, function_name: str, test_inputs: list) -> float:
     """Execute code, measure and return peak memory in MB."""
 
-    # Syntax check first
     try:
         compile(code, "<string>", "exec")
     except SyntaxError as e:
@@ -70,66 +145,33 @@ def measure_memory(code: str, function_name: str, test_inputs: list) -> float:
     return round(peak / (1024 * 1024), 4)
 
 
-def find_function_source(script_path: str, function_name: str) -> tuple[str, bool]:
-    """
-    Find function source across all project files.
-    Returns (full_source, is_method).
-    """
-    script = Path(script_path)
-    project_folder = script.parent
-    all_files = list(project_folder.rglob("*.py"))
-    if script not in all_files:
-        all_files.append(script)
-
-    for f in all_files:
-        if f.name == "__init__.py":
-            continue
-        try:
-            source = f.read_text()
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                    method = is_method(source, function_name)
-                    return source, method
-        except SyntaxError:
-            continue
-
-    return "", False
-
-def find_class_for_method(source_code: str, function_name: str) -> str:
-    """Find the class name that contains this method."""
-    tree = ast.parse(source_code)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            for item in ast.walk(node):
-                if isinstance(item, ast.FunctionDef) and item.name == function_name:
-                    return node.name
-    return ""
-
-
-def measure_method_memory(source: str, class_name: str, function_name: str, test_inputs: list) -> float:
+def measure_method_memory(
+    source: str,
+    class_name: str,
+    function_name: str,
+    test_inputs: list,
+    class_init_args: dict = None,
+    import_string: str = ""
+) -> float:
     """Instantiate class and measure memory of calling a method."""
-    
-    # Build init args for known classes
-    init_args = {
-        "SlowMLP": "input_dim=128, hidden_dim=256, output_dim=10",
-        "SlowAttention": "dim=128",
-        "SlowDataset": "size=100, feature_dim=32",
-    }
-    
-    args = init_args.get(class_name, "")
-    
+
+    if class_init_args:
+        args_str = ", ".join(f"{k}={v}" for k, v in class_init_args.items())
+    else:
+        args_str = ""
+
+    input_params = ", ".join([f"input_{i}" for i in range(len(test_inputs))])
+    input_args = ", ".join([f"input_{i}" for i in range(len(test_inputs))])
+
     wrapper = f"""
-{ORIGINAL_IMPORTS}
-import torch.nn as nn
+{import_string}
 {source}
 
-def __test_method__({', '.join(['self_input_' + str(i) for i in range(len(test_inputs))])}):
-    instance = {class_name}({args})
-    return instance.{function_name}({', '.join(['self_input_' + str(i) for i in range(len(test_inputs))])})
+def __test_method__({input_params}):
+    instance = {class_name}({args_str})
+    return instance.{function_name}({input_args})
 """
-    
-    # Syntax check
+
     try:
         compile(wrapper, "<string>", "exec")
     except SyntaxError as e:
@@ -158,12 +200,21 @@ def __test_method__({', '.join(['self_input_' + str(i) for i in range(len(test_i
 
     return round(peak / (1024 * 1024), 4)
 
-def run_memory_agent_pass1(script_path: str, bottleneck_functions: list) -> dict[str, MemoryAgentOutput]:
+
+def run_memory_agent_pass1(
+    script_path: str,
+    bottleneck_functions: list,
+    dataflow_output: dict[str, DataflowOutput] = None,
+    available_packages: list[str] = None
+) -> dict[str, MemoryAgentOutput]:
     """
     PASS 1 — Measure baseline memory of original functions.
-    Runs before Generator. Only measures standalone functions, skips methods.
+    Runs before Generator. Uses Dataflow Agent output for test inputs.
+    Uses Dependency Resolver output for imports.
     """
     print("[Memory Agent] PASS 1 — Measuring baseline memory on original code...")
+
+    import_string = build_import_string(available_packages or [], include_numba=False)
     results = {}
 
     for func_name in bottleneck_functions:
@@ -181,11 +232,13 @@ def run_memory_agent_pass1(script_path: str, bottleneck_functions: list) -> dict
             )
             continue
 
+        dataflow = dataflow_output.get(func_name) if dataflow_output else None
+        test_inputs = build_test_input_from_dataflow(dataflow) if dataflow else []
+
         if method:
             print(f"[Memory Agent] {func_name} is a class method — finding class...")
             class_name = find_class_for_method(source, func_name)
             if not class_name:
-                print(f"[Memory Agent] Could not find class for {func_name}")
                 results[func_name] = MemoryAgentOutput(
                     function=func_name,
                     peak_mb=-1.0,
@@ -193,22 +246,17 @@ def run_memory_agent_pass1(script_path: str, bottleneck_functions: list) -> dict
                     warning="Class not found for method"
                 )
                 continue
-            print(f"[Memory Agent] Found class: {class_name}")
-            test_inputs = build_test_input(func_name)
-            peak_mb = measure_method_memory(source, class_name, func_name, test_inputs)
-            results[func_name] = MemoryAgentOutput(
-                function=func_name,
-                peak_mb=peak_mb,
-                phase="original",
-                warning=None if peak_mb >= 0 else "Could not measure class method memory"
-            )
-            if peak_mb >= 0:
-                print(f"[Memory Agent] {func_name} baseline: {peak_mb}MB")
-            continue
 
-        full_code = ORIGINAL_IMPORTS + source
-        test_inputs = build_test_input(func_name)
-        peak_mb = measure_memory(full_code, func_name, test_inputs)
+            print(f"[Memory Agent] Found class: {class_name}")
+            class_init_args = dataflow.class_init_args if dataflow else None
+            peak_mb = measure_method_memory(
+                source, class_name, func_name,
+                test_inputs, class_init_args, import_string
+            )
+
+        else:
+            full_code = import_string + source
+            peak_mb = measure_memory(full_code, func_name, test_inputs)
 
         results[func_name] = MemoryAgentOutput(
             function=func_name,
@@ -223,22 +271,28 @@ def run_memory_agent_pass1(script_path: str, bottleneck_functions: list) -> dict
     return results
 
 
-def run_memory_agent_pass2(generator_output: dict[str, GeneratorOutput]) -> dict[str, MemoryAgentOutput]:
+def run_memory_agent_pass2(
+    generator_output: dict[str, GeneratorOutput],
+    dataflow_output: dict[str, DataflowOutput] = None,
+    available_packages: list[str] = None
+) -> dict[str, MemoryAgentOutput]:
     """
     PASS 2 — Measure memory of optimized functions after Verifier confirms they work.
+    Uses Dependency Resolver output for imports.
     """
     print("[Memory Agent] PASS 2 — Measuring memory on optimized code...")
+
+    import_string = build_import_string(available_packages or [], include_numba=True)
     results = {}
 
     for func_name, gen_output in generator_output.items():
         print(f"\n[Memory Agent] Measuring optimized: {func_name}")
 
-        prefix = OPTIMIZED_IMPORTS
-        if gen_output.strategy == "numba":
-            prefix += "import numba as nb\n"
+        full_code = import_string + "\n" + gen_output.optimized_code
 
-        full_code = prefix + "\n" + gen_output.optimized_code
-        test_inputs = build_test_input(func_name)
+        dataflow = dataflow_output.get(func_name) if dataflow_output else None
+        test_inputs = build_test_input_from_dataflow(dataflow) if dataflow else []
+
         peak_mb = measure_memory(full_code, func_name, test_inputs)
 
         results[func_name] = MemoryAgentOutput(
@@ -297,15 +351,24 @@ def compare_memory(
 if __name__ == "__main__":
     import json
     from kairos_lab.agents.profiler import run_profiler
+    from kairos_lab.agents.dataflow_agent import run_dataflow_agent
+    from kairos_lab.agents.dependency_resolver import run_dependency_resolver
 
     script = sys.argv[1] if len(sys.argv) > 1 else "sample_project/main.py"
 
     profiler_output = run_profiler(script)
     bottlenecks = profiler_output.top_functions
+    print(f"\n[Memory Agent] Bottlenecks: {bottlenecks}")
 
-    print(f"\n[Memory Agent] Bottlenecks to measure: {bottlenecks}")
+    dependency_output = run_dependency_resolver(script)
+    available_packages = dependency_output.available
+    print(f"[Memory Agent] Available packages: {available_packages}")
 
-    pass1_results = run_memory_agent_pass1(script, bottlenecks)
+    dataflow_output = run_dataflow_agent(script, bottlenecks)
+
+    pass1_results = run_memory_agent_pass1(
+        script, bottlenecks, dataflow_output, available_packages
+    )
 
     print("\n" + "=" * 50)
     print("MEMORY AGENT PASS 1 OUTPUT")

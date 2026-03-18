@@ -85,18 +85,35 @@ class MemoryComparisonOutput(BaseModel):
     memory_increased: bool
     warning: Optional[str] = None
 
+class DataflowOutput(BaseModel):
+    function: str
+    input_shapes: dict[str, list]
+    input_types: dict[str, str]
+    class_name: Optional[str] = None
+    class_init_args: Optional[dict] = None
 
 class PipelineState(BaseModel):
     script_path: str
+
     dependency_output: Optional[DependencyResolverOutput] = None
+
     project_graph_output: Optional[ProjectGraphOutput] = None
+
     profiler_output: Optional[ProfilerOutput] = None
+
     memory_baseline: Optional[dict[str, MemoryAgentOutput]] = None
     memory_optimized: Optional[dict[str, MemoryAgentOutput]] = None
     memory_comparison: Optional[dict[str, MemoryComparisonOutput]] = None
+
+    dataflow_output: Optional[dict[str, DataflowOutput]] = None
+
     ast_output: Optional[dict[str, ASTResult]] = None
+
     architect_output: Optional[dict[str, ArchitectDecision]] = None
+
     generator_output: Optional[dict[str, GeneratorOutput]] = None
+
     verifier_output: Optional[dict[str, VerifierOutput]] = None
+    
     approved: bool = False
     final_output: Optional[dict] = None
