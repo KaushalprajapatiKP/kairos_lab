@@ -92,6 +92,14 @@ class DataflowOutput(BaseModel):
     class_name: Optional[str] = None
     class_init_args: Optional[dict] = None
 
+class CriticOutput(BaseModel):
+    function: str
+    critic_type: str  # "performance" or "correctness"
+    passed: bool
+    score: float      # 0.0 to 1.0
+    issues: list[str]
+    suggestions: list[str]
+
 class PipelineState(BaseModel):
     script_path: str
 
@@ -113,7 +121,10 @@ class PipelineState(BaseModel):
 
     generator_output: Optional[dict[str, GeneratorOutput]] = None
 
+    performance_critic_output: Optional[dict[str, CriticOutput]] = None
+    correctness_critic_output: Optional[dict[str, CriticOutput]] = None
+
     verifier_output: Optional[dict[str, VerifierOutput]] = None
-    
+
     approved: bool = False
     final_output: Optional[dict] = None

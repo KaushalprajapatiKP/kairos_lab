@@ -29,9 +29,9 @@ User Python Project (single file or multi-file module)
            ▼                       ▼
 ┌──────────────────┐    ┌──────────────────────┐
 │  Memory Agent    │    │    Dataflow Agent     │
-│  (PASS 1)        │    │    (PASS 1)           │
-│  Baseline memory │    │  Baseline data flow,  │
-│  on original code│    │  tensor shapes, types │
+│  (PASS 1)        │    │                       │
+│  Baseline memory │    │  Real shape inference │
+│  on original code│    │  from call sites      │
 └────────┬─────────┘    └──────────┬────────────┘
          └───────────┬─────────────┘
                      │
@@ -50,7 +50,8 @@ User Python Project (single file or multi-file module)
                        ▼
           ┌─────────────────────────┐
           │     Generator Agent     │  Writes optimized GPU code
-          │                         │  via LLM (deepseek-r1:7b)
+          │                         │  via LLM. Retries on critic failure
+          │                         │  (max 3 attempts per function)
           └────────────┬────────────┘
                        │
            ┌───────────┴───────────┐
@@ -59,62 +60,68 @@ User Python Project (single file or multi-file module)
 ┌──────────────────┐    ┌──────────────────────┐
 │ Performance      │    │  Correctness Critic   │
 │ Critic           │    │                       │
-│ Static analysis  │    │  Static analysis —    │
-│ speedup claim    │    │  logic preserved?     │
+│                  │    │  Static analysis —    │
+│ Score >= 0.5?    │    │  logic preserved?     │
+│ Patterns correct?│    │  Score >= 0.5?        │
 └────────┬─────────┘    └──────────┬────────────┘
          └───────────┬─────────────┘
                      │
-                     ▼
-          ┌─────────────────────────┐
-          │      Verifier Agent     │  Runs on real GPU, benchmarks
-          │                         │  speed + correctness. Loops back
-          │                         │  to Generator if not faster.
-          └────────────┬────────────┘
-                       │
-           ┌───────────┴───────────┐
-           │       PARALLEL        │
-           ▼                       ▼
-┌──────────────────┐    ┌──────────────────────┐
-│  Memory Agent    │    │    Dataflow Agent     │
-│  (PASS 2)        │    │    (PASS 2)           │
-│  Optimized code  │    │  Optimized data flow  │
-│  memory usage    │    │  shapes preserved?    │
-└────────┬─────────┘    └──────────┬────────────┘
-         └───────────┬─────────────┘
-                     │
-                     ▼
-          ┌─────────────────────────┐
-          │   Memory Comparison     │  Delta: original vs optimized
-          │                         │  Flag if memory increased
-          └────────────┬────────────┘
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │      Diff Viewer        │  Shows exactly what changed
-          │                         │  and why, line by line
-          └────────────┬────────────┘
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │   Human-in-the-Loop     │  Engineer reviews edge cases
-          │                         │  before final output
-          └────────────┬────────────┘
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │   Documentation Agent   │  Auto-generates inline comments,
-          │                         │  API docs, benchmark report,
-          │                         │  migration notes
-          └────────────┬────────────┘
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │      Learning Agent     │  Stores successful patterns in
-          │                         │  FAISS vector DB for future jobs
-          └────────────┬────────────┘
-                       │
-                       ▼
-              Optimization Knowledge Base
+              Both passed?
+              ┌───────┴───────┐
+              │ NO            │ YES
+              ▼               ▼
+        Loop back to    ┌─────────────────────────┐
+        Generator with  │      Verifier Agent     │
+        critic feedback │                         │
+        (max 3 attempts)│  Runs on real GPU,      │
+                        │  benchmarks speed +     │
+                        │  correctness. Loops     │
+                        │  back to Generator      │
+                        │  if not faster.         │
+                        └────────────┬────────────┘
+                                     │
+                          ┌──────────┴──────────┐
+                          │       PARALLEL       │
+                          ▼                      ▼
+               ┌──────────────────┐   ┌──────────────────────┐
+               │  Memory Agent    │   │    Dataflow Agent     │
+               │  (PASS 2)        │   │    (PASS 2)           │
+               │  Optimized code  │   │  Shapes preserved?    │
+               │  memory usage    │   │                       │
+               └────────┬─────────┘   └──────────┬────────────┘
+                        └──────────┬──────────────┘
+                                   │
+                                   ▼
+                        ┌─────────────────────────┐
+                        │   Memory Comparison     │
+                        │   Delta: original vs    │
+                        │   optimized             │
+                        └────────────┬────────────┘
+                                     │
+                                     ▼
+                        ┌─────────────────────────┐
+                        │      Diff Viewer        │
+                        └────────────┬────────────┘
+                                     │
+                                     ▼
+                        ┌─────────────────────────┐
+                        │   Human-in-the-Loop     │
+                        └────────────┬────────────┘
+                                     │
+                                     ▼
+                        ┌─────────────────────────┐
+                        │   Documentation Agent   │
+                        └────────────┬────────────┘
+                                     │
+                                     ▼
+                        ┌─────────────────────────┐
+                        │      Learning Agent     │
+                        │  Stores successful      │
+                        │  patterns in FAISS DB   │
+                        └────────────┬────────────┘
+                                     │
+                                     ▼
+                           Optimization Knowledge Base
 ```
 
 ## Example — What It Finds Automatically
@@ -222,18 +229,19 @@ python kairos_lab/agents/generator.py sample_project/main.py
 - [x] Dependency Resolver — recursive multi-file scanning
 - [x] Project Graph Builder — call graph + call sites with line numbers
 - [x] Profiler — cProfile + LLM bottleneck analysis
+- [x] Memory Agent Pass 1 — baseline memory on original code, class method support
+- [x] Dataflow Agent — real shape inference from call sites, no hardcoding
 - [x] AST Parser — multi-file, asttokens line mapping
 - [x] Architect — Triton / Numba / CUDA strategy decision
-- [x] Generator — LLM code generation (deepseek-r1:7b)
-- [ ] Memory Agent
-- [ ] Dataflow Agent
-- [ ] Verifier
-- [ ] Performance Critic
+- [x] Generator — LLM code generation (mistral)
+- [x] Performance Critic — static analysis, knowledge base ready for Learning Agent
 - [ ] Correctness Critic
+- [ ] Verifier — GPU benchmark, loops back to Generator if not faster
+- [ ] Memory Agent Pass 2 + Comparison
 - [ ] Diff Viewer
 - [ ] Human-in-the-Loop
 - [ ] Documentation Agent
-- [ ] Learning Agent
+- [ ] Learning Agent → Optimization Knowledge Base
 
 ## Requirements
 - Python 3.10+
