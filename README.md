@@ -25,13 +25,13 @@ User Python Project (single file or multi-file module)
           └────────────┬────────────┘
                        │
            ┌───────────┴───────────┐
-           │     PARALLEL          │
+           │       PARALLEL        │
            ▼                       ▼
 ┌──────────────────┐    ┌──────────────────────┐
-│   Memory Agent   │    │    Dataflow Agent     │
-│                  │    │                       │
-│ tracemalloc on   │    │ Torch FX dataflow     │
-│ original code    │    │ analysis              │
+│  Memory Agent    │    │    Dataflow Agent     │
+│  (PASS 1)        │    │    (PASS 1)           │
+│  Baseline memory │    │  Baseline data flow,  │
+│  on original code│    │  tensor shapes, types │
 └────────┬─────────┘    └──────────┬────────────┘
          └───────────┬─────────────┘
                      │
@@ -54,14 +54,13 @@ User Python Project (single file or multi-file module)
           └────────────┬────────────┘
                        │
            ┌───────────┴───────────┐
-           │     PARALLEL          │
+           │       PARALLEL        │
            ▼                       ▼
 ┌──────────────────┐    ┌──────────────────────┐
 │ Performance      │    │  Correctness Critic   │
 │ Critic           │    │                       │
-│                  │    │ Validates output is   │
-│ Checks speedup   │    │ mathematically correct│
-│ claim is real    │    │                       │
+│ Static analysis  │    │  Static analysis —    │
+│ speedup claim    │    │  logic preserved?     │
 └────────┬─────────┘    └──────────┬────────────┘
          └───────────┬─────────────┘
                      │
@@ -70,6 +69,23 @@ User Python Project (single file or multi-file module)
           │      Verifier Agent     │  Runs on real GPU, benchmarks
           │                         │  speed + correctness. Loops back
           │                         │  to Generator if not faster.
+          └────────────┬────────────┘
+                       │
+           ┌───────────┴───────────┐
+           │       PARALLEL        │
+           ▼                       ▼
+┌──────────────────┐    ┌──────────────────────┐
+│  Memory Agent    │    │    Dataflow Agent     │
+│  (PASS 2)        │    │    (PASS 2)           │
+│  Optimized code  │    │  Optimized data flow  │
+│  memory usage    │    │  shapes preserved?    │
+└────────┬─────────┘    └──────────┬────────────┘
+         └───────────┬─────────────┘
+                     │
+                     ▼
+          ┌─────────────────────────┐
+          │   Memory Comparison     │  Delta: original vs optimized
+          │                         │  Flag if memory increased
           └────────────┬────────────┘
                        │
                        ▼

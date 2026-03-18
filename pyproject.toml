@@ -9,6 +9,7 @@ dependencies = [
     "langchain-core>=1.2.19",
     "langgraph>=1.1.2",
     "networkx>=3.6.1",
+    "numba>=0.64.0",
     "numpy>=2.4.3",
     "pydantic>=2.12.5",
     "requests>=2.32.5",

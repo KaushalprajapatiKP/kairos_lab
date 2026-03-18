@@ -70,15 +70,33 @@ class ProjectGraphOutput(BaseModel):
     leaf_functions: list[str]
     call_sites: dict[str, list[dict]]  
 
+class MemoryAgentOutput(BaseModel):
+    function: str
+    peak_mb: float
+    phase: str  # "original" or "optimized"
+    warning: Optional[str] = None
+
+
+class MemoryComparisonOutput(BaseModel):
+    function: str
+    original_peak_mb: float
+    optimized_peak_mb: float
+    memory_delta_mb: float
+    memory_increased: bool
+    warning: Optional[str] = None
+
 
 class PipelineState(BaseModel):
     script_path: str
+    dependency_output: Optional[DependencyResolverOutput] = None
+    project_graph_output: Optional[ProjectGraphOutput] = None
     profiler_output: Optional[ProfilerOutput] = None
+    memory_baseline: Optional[dict[str, MemoryAgentOutput]] = None
+    memory_optimized: Optional[dict[str, MemoryAgentOutput]] = None
+    memory_comparison: Optional[dict[str, MemoryComparisonOutput]] = None
     ast_output: Optional[dict[str, ASTResult]] = None
     architect_output: Optional[dict[str, ArchitectDecision]] = None
     generator_output: Optional[dict[str, GeneratorOutput]] = None
     verifier_output: Optional[dict[str, VerifierOutput]] = None
     approved: bool = False
     final_output: Optional[dict] = None
-    dependency_output: Optional[DependencyResolverOutput] = None
-    project_graph_output: Optional[ProjectGraphOutput] = None
