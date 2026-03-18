@@ -10,38 +10,82 @@ def decide_strategy(ast_result: ASTResult) -> ArchitectDecision:
     data_types = ast_result.data_types
     loop_depth = ast_result.max_nesting_depth
     func_name = ast_result.function_name
+    operations = ast_result.operations
 
+    # Rule 1 — nested loops + TENSOR indexed access + no scalar extraction = Triton
     if (pattern == "element_wise" and
             "torch_tensor" in data_types and
-            loop_depth >= 2):
+            "indexed_access" in data_types and
+            loop_depth >= 2 and
+            "item" not in operations):
         return ArchitectDecision(
             function=func_name,
             strategy="triton",
             confidence="high",
-            reason="Nested loops with element-wise tensor access. Triton kernel will parallelize across rows and columns.",
+            reason="Nested loops with element-wise tensor access. Triton kernel will parallelize across tensor dimensions.",
             action=f"Generate Triton kernel for {func_name} that parallelizes across tensor dimensions."
         )
 
+    # Rule 1b — nested loops + tensor access + scalar extraction via .item() = Numba
     elif (pattern == "element_wise" and
-          "python_list" in data_types and
+            "torch_tensor" in data_types and
+            "item" in operations and
+            loop_depth >= 1):
+        return ArchitectDecision(
+            function=func_name,
+            strategy="numba",
+            confidence="high",
+            reason="Nested loops extracting scalar values from tensors via .item(). Numba JIT with numpy arrays will eliminate Python loop overhead.",
+            action=f"Apply @numba.jit to {func_name}, replace tensor indexing with numpy array operations."
+        )
+
+    # Rule 2 — nested loops + scalar math, no tensors = Numba
+    elif (pattern == "element_wise" and
+          "torch_tensor" not in data_types and
           loop_depth >= 1):
         return ArchitectDecision(
             function=func_name,
             strategy="numba",
             confidence="high",
-            reason="Simple loops with Python lists or scalar ops. Numba JIT will give significant speedup.",
-            action=f"Apply @numba.jit decorator to {func_name} and replace list with numpy array."
+            reason="Nested loops with scalar math operations. Numba JIT will parallelize without GPU overhead.",
+            action=f"Apply @numba.jit(nopython=True) to {func_name} and replace Python lists with numpy arrays."
         )
 
+    # Rule 3 — element wise + python list + no tensors = Numba
+    elif (pattern == "element_wise" and
+          "python_list" in data_types and
+          "torch_tensor" not in data_types):
+        return ArchitectDecision(
+            function=func_name,
+            strategy="numba",
+            confidence="high",
+            reason="Element-wise operations on Python lists. Numba JIT with numpy arrays will give significant speedup.",
+            action=f"Apply @numba.jit to {func_name} and replace list with numpy array."
+        )
+
+    # Rule 4 — element wise + both tensor and list = Triton
+    elif (pattern == "element_wise" and
+          "torch_tensor" in data_types and
+          loop_depth >= 2):
+        return ArchitectDecision(
+            function=func_name,
+            strategy="triton",
+            confidence="medium",
+            reason="Nested loops with mixed tensor and list access.",
+            action=f"Generate Triton kernel for {func_name}."
+        )
+
+    # Rule 5 — vectorized torch ops = CUDA fusion
     elif pattern == "vectorized" and "torch_tensor" in data_types:
         return ArchitectDecision(
             function=func_name,
             strategy="cuda",
             confidence="medium",
-            reason="Already vectorized torch ops. Custom CUDA kernel can fuse operations.",
+            reason="Already vectorized torch ops. Custom CUDA kernel can fuse operations and reduce memory bandwidth.",
             action=f"Write fused CUDA kernel for {func_name} to reduce memory bandwidth."
         )
 
+    # Rule 6 — vectorized no tensors = Numba
     elif pattern == "vectorized":
         return ArchitectDecision(
             function=func_name,
@@ -51,6 +95,7 @@ def decide_strategy(ast_result: ASTResult) -> ArchitectDecision:
             action=f"Apply @numba.jit to {func_name}."
         )
 
+    # Fallback
     else:
         return ArchitectDecision(
             function=func_name,
